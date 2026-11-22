@@ -12,6 +12,7 @@
 #include <forward_list>
 #include <wrl\client.h>
 #include "heightmap.h"
+#include "variable.h"
 
 #define LEN(arr) (sizeof (arr) / sizeof (arr)[0])
 
@@ -24,7 +25,6 @@ struct ID2D1Factory;
 struct IWICImagingFactory;
 struct IDWriteFactory;
 struct IWICFormatConverter;
-class Variable;
 typedef std::pair<HRESULT, std::string> HERROR;
 typedef GUID WICPixelFormatGUID;
 
@@ -96,10 +96,17 @@ public:
 		: m_Type(std::move(type)), m_Index(std::move(index)), m_ScrollPos(std::move(scrollpos)), m_bActive(std::move(bActive)), m_Location(D2D1::Point2F(-1.f, -1.f))
 	{	}
 
-	enum EntryType { Landmark, Carpart, Misc };
+	enum EntryType { Landmark, Carpart, Item, Misc };
 	uint32_t m_Type, m_Index, m_ScrollPos;
 	bool m_bActive;
 	D2D1_POINT_2F m_Location;
+};
+
+struct MapCarPart
+{
+	const Variable* position;
+	uint32_t reportIndex;
+	bool companionMounted;
 };
 
 class MapDialog
@@ -133,6 +140,7 @@ private:
 	INT_PTR OnSidebarMouseWheel(WPARAM wParam, LPARAM lParam);
 	INT_PTR OnSidebarLButtondown(WPARAM wParam, LPARAM lParam);
 	void SidebarToggleCategory(uint32_t type);
+	void SetMapMarkerActive(SidebarListEntry& item, bool active);
 	void SidebarUpdateScrollbar(uint32_t nPage = UINT_MAX);
 
 	// Convert JPG to raw bitmap
@@ -214,8 +222,11 @@ private:
 	INT													m_SidebarListScrollRange;
 	UINT												m_CarTransformIndex;
 	std::string m_CompanionCarTransform;
-	// Position variable index and optional Rivett report part index.
-	std::vector<std::pair<size_t, uint32_t>> m_MapCarParts;
+	std::vector<MapCarPart> m_MapCarParts;
+	std::vector<Variable> m_CompanionItems;
+	std::vector<Variable> m_CompanionParts;
+	std::vector<Variable> m_CompanionWorld;
+	std::vector<const Variable*> m_MapItems;
 
 	D2D1_POINT_2F										m_MapWindowMousePos;
 	D2D1_POINT_2F										m_MapDragPrevPt;

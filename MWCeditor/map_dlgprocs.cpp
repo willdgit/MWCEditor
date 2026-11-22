@@ -97,40 +97,58 @@ void MapDialog::SidebarToggleCategory(uint32_t type)
 	m_SidebarListCurrentScrollpos = max(0, min(m_SidebarListCurrentScrollpos, m_SidebarListScrollRange - static_cast<INT>(m_SidebarListRenderTarget->GetSize().height)));
 }
 
+void MapDialog::SetMapMarkerActive(SidebarListEntry& item, bool active)
+{
+	if (item.m_bActive == active)
+		return;
+
+	item.m_bActive = active;
+	if (active)
+	{
+		item.m_Location = GetSidebarItemLocation(&item);
+		m_MapMarkers.push_front(&item);
+	}
+	else
+	{
+		m_MapMarkers.remove(&item);
+		m_MapMarkersSelected.erase(std::remove(m_MapMarkersSelected.begin(), m_MapMarkersSelected.end(), &item),
+			m_MapMarkersSelected.end());
+	}
+}
+
 INT_PTR MapDialog::OnSidebarLButtondown(WPARAM wParam, LPARAM lParam)
 {
-	D2D1_POINT_2F p;
-	p.x = static_cast<FLOAT>(GET_X_LPARAM(lParam));
-	p.y = m_SidebarListCurrentScrollpos + static_cast<FLOAT>(GET_Y_LPARAM(lParam));
+	const int x = GET_X_LPARAM(lParam);
+	const auto y = static_cast<uint32_t>(m_SidebarListCurrentScrollpos + GET_Y_LPARAM(lParam));
 
 	for (auto& item : m_SidebarItems)
 	{
-		if (p.y >= item.m_ScrollPos && p.y <= item.m_ScrollPos + s_MapSidebarListEntryHeight)
-		{
-			// Toggle active state
-			item.m_bActive = !item.m_bActive;
+		if (item.m_ScrollPos == UINT_MAX || y < item.m_ScrollPos || y >= item.m_ScrollPos + s_MapSidebarListEntryHeight)
+			continue;
 
-			// Is category?
-			if (item.m_Index == UINT_MAX)
-			{
-				SidebarToggleCategory(item.m_Type);
-				SidebarUpdateScrollbar();
-			}
-			else 
-			{
-				if (item.m_bActive)
-				{
-					m_MapMarkers.push_front(&item);
-					if (item.m_Location.x == -1.f)
-						item.m_Location = GetSidebarItemLocation(&item);
-				}
-				else
-					m_MapMarkers.remove(&item);
-				OnMapRender(m_MapRenderTarget->GetHwnd());
-			}
-			OnSidebarListRender(m_SidebarListRenderTarget->GetHwnd());
-			break;
+		if (item.m_Index != UINT_MAX)
+		{
+			SetMapMarkerActive(item, !item.m_bActive);
+			OnMapRender(m_MapRenderTarget->GetHwnd());
 		}
+		else if (x < 18)
+		{
+			const bool enable = std::any_of(m_SidebarItems.begin(), m_SidebarItems.end(), [&](const SidebarListEntry& marker) {
+				return marker.m_Index != UINT_MAX && marker.m_Type == item.m_Type && !marker.m_bActive;
+			});
+			for (auto& marker : m_SidebarItems)
+				if (marker.m_Index != UINT_MAX && marker.m_Type == item.m_Type)
+					SetMapMarkerActive(marker, enable);
+			OnMapRender(m_MapRenderTarget->GetHwnd());
+		}
+		else
+		{
+			item.m_bActive = !item.m_bActive;
+			SidebarToggleCategory(item.m_Type);
+			SidebarUpdateScrollbar();
+		}
+		OnSidebarListRender(m_SidebarListRenderTarget->GetHwnd());
+		break;
 	}
 	return FALSE;
 }
@@ -239,18 +257,9 @@ INT_PTR CALLBACK MapDialog::SidebarProc(HWND hwnd, uint32_t Message, WPARAM wPar
 			{
 			case 1:
 			case 2:
-				map->m_MapMarkers.clear();
 				for (auto& item : map->m_SidebarItems)
 					if (item.m_Index != UINT_MAX)
-					{
-						item.m_bActive = CtrlID == 1 ? TRUE : FALSE;
-						if (CtrlID == 1)
-						{
-							map->m_MapMarkers.push_front(&item);
-							if (item.m_Location.x == -1.f)
-								item.m_Location = map->GetSidebarItemLocation(&item);
-						}
-					}
+						map->SetMapMarkerActive(item, CtrlID == 1);
 				map->OnSidebarListRender(map->m_SidebarListRenderTarget->GetHwnd());
 				map->OnMapRender(map->m_MapRenderTarget->GetHwnd());
 				SendMessage(map->m_hwnd, WM_NEXTDLGCTL, (WPARAM)map->m_MapRenderTarget->GetHwnd(), TRUE);
