@@ -3,6 +3,7 @@
 #include <wincodec.h>
 #include <shlwapi.h> 
 #include <thread>
+#include <cmath>
 #include <commdlg.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -178,7 +179,7 @@ MapDialog::MapDialog()
 	m_SidebarListCurrentScrollpos(0),
 	m_SidebarListScrollRange(0),
 	m_DialogMapSize(D2D1_SIZE_U()),
-	m_SatsumaTransformIndex(UINT_MAX)
+	m_CarTransformIndex(UINT_MAX)
 {
 	m_MapDDSPath = appfolderpath;
 	AppendPath(m_MapDDSPath, s_MapDDSName);
@@ -197,6 +198,7 @@ MapDialog::MapDialog()
 MapDialog::~MapDialog()
 {
 	m_SidebarAssortedItems.clear();
+	m_MapCarParts.clear();
 	m_SidebarAssortedItems.shrink_to_fit();
 	m_SidebarItems.clear();
 	m_SidebarItems.shrink_to_fit();
@@ -748,6 +750,20 @@ HERROR MapDialog::CreateDeviceIndependentResources()
 	return hr;
 }
 
+static int FindCarPartTransform(const CarPart& part)
+{
+	const int positionIndex = FindVariable(part.name + L"pos");
+	if (positionIndex >= 0 && variables[positionIndex].header.IsNonContainerOfValueType(EntryValue::Transform))
+		return positionIndex;
+
+	const int baseIndex = FindVariable(part.name);
+	if (baseIndex >= 0 && variables[baseIndex].header.IsNonContainerOfValueType(EntryValue::Transform))
+		return baseIndex;
+
+	return -1;
+}
+
+
 SidebarListEntry* MapDialog::FindVariableInSidebarList(Variable* var)
 {
 	SidebarListEntry* Entry = NULL;
@@ -765,7 +781,8 @@ SidebarListEntry* MapDialog::FindVariableInSidebarList(Variable* var)
 		}
 		else if (Item.m_Type == 1)
 		{
-			if (carparts[Item.m_Index].name == var->key)
+			const auto transformIndex = m_MapCarParts[Item.m_Index].first;
+			if (&variables[transformIndex] == var)
 			{
 				Entry = &Item;
 				break;
@@ -810,6 +827,7 @@ void MapDialog::ShowObjectOnMap(class Variable* var)
 void MapDialog::ClearAllMapObjects(bool bForceReRender /*= TRUE*/)
 {
 	m_SidebarAssortedItems.clear();
+	m_MapCarParts.clear();
 	m_MapMarkersSelected.clear();
 	m_SidebarItems.clear();
 	m_MapMarkers.clear();
@@ -817,7 +835,8 @@ void MapDialog::ClearAllMapObjects(bool bForceReRender /*= TRUE*/)
 	m_SidebarListScrollRange = s_MapSidebarListEntryHeight * 3;
 	SidebarUpdateScrollbar();
 
-	m_SatsumaTransformIndex = UINT_MAX;
+	m_CarTransformIndex = UINT_MAX;
+	m_CompanionCarTransform.clear();
 
 	if (bForceReRender)
 	{
@@ -830,20 +849,33 @@ void MapDialog::UpdateAllMapObjects(bool bForceReRender)
 {
 	ClearAllMapObjects(FALSE);
 
-	for (auto& var : variables)
-		if (var.header.IsNonContainerOfValueType(EntryValue::Transform))
+	std::vector<bool> partTransforms(variables.size(), false);
+	const auto filenameStart = filepath.find_last_of(L"\\/") + 1;
+	const bool isCarPartsFile = _wcsicmp(filepath.c_str() + filenameStart, L"carparts.txt") == 0;
+	for (uint32_t i = 0; i < carparts.size(); ++i)
+	{
+		const int transformIndex = FindCarPartTransform(carparts[i]);
+		if (transformIndex >= 0)
 		{
-			std::vector<CarPart>::iterator it = carparts.begin();
-			while (it != carparts.end())
-			{
-				if (it->name == var.key)
-					break;
-				++it;
-			}
-			if (it == carparts.end() && (var.key.size() <= 8 || var.key.substr(0, 8) != L"location"))
-				m_SidebarAssortedItems.push_back(&var);
+			partTransforms[transformIndex] = true;
+			m_MapCarParts.emplace_back(transformIndex, i);
 		}
-			
+	}
+
+	for (size_t i = 0; i < variables.size(); ++i)
+	{
+		auto& var = variables[i];
+		if (partTransforms[i] || !var.header.IsNonContainerOfValueType(EntryValue::Transform) ||
+			var.key.compare(0, 8, L"location") == 0)
+			continue;
+
+		if (isCarPartsFile && var.key.size() > 3 && var.key.compare(var.key.size() - 3, 3, L"pos") == 0 &&
+			var.key != L"corrispos")
+			m_MapCarParts.emplace_back(i, UINT_MAX);
+		else
+			m_SidebarAssortedItems.push_back(&var);
+	}
+
 	// Add Landmarks
 	uint32_t offset = -1;
 	m_SidebarItems.push_back(SidebarListEntry(0, UINT_MAX, s_MapSidebarListEntryHeight * ++offset, FALSE));
@@ -853,17 +885,32 @@ void MapDialog::UpdateAllMapObjects(bool bForceReRender)
 
 	// Add Carparts that have a transform
 	m_SidebarItems.push_back(SidebarListEntry(1, UINT_MAX, s_MapSidebarListEntryHeight * ++offset, FALSE));
-	for (uint32_t i = 0; i < carparts.size(); i++)
-		if (FindVariable(carparts[i].name) >= 0)
-			m_SidebarItems.push_back(SidebarListEntry(1, i, UINT_MAX, FALSE));
+	for (uint32_t i = 0; i < m_MapCarParts.size(); ++i)
+		m_SidebarItems.push_back(SidebarListEntry(1, i, UINT_MAX, FALSE));
 
 	// Add Rest
 	m_SidebarItems.push_back(SidebarListEntry(2, UINT_MAX, s_MapSidebarListEntryHeight * ++offset, FALSE));
 	for (uint32_t i = 0; i < m_SidebarAssortedItems.size(); i++)
 		m_SidebarItems.push_back(SidebarListEntry(2, i, UINT_MAX, FALSE));
 
-	// Store index to Satsuma transform, used by carparts
-	m_SatsumaTransformIndex = FindVariable(L"cartransform");
+	// Installed parts use the car's world position. MWC stores it in savefile.txt.
+	m_CarTransformIndex = FindVariable(L"corrispos");
+	if (m_CarTransformIndex == UINT_MAX)
+		m_CarTransformIndex = FindVariable(L"cartransform");
+
+	if (m_CarTransformIndex == UINT_MAX && isCarPartsFile)
+	{
+		std::wstring companionPath = filepath.substr(0, filenameStart) + L"savefile.txt";
+		std::vector<Variable> companionVariables;
+		if (ParseSavegame(&companionPath, &companionVariables).first == -1)
+		{
+			const auto car = std::find_if(companionVariables.begin(), companionVariables.end(), [](const Variable& var) {
+				return var.key == L"corrispos" && var.header.IsNonContainerOfValueType(EntryValue::Transform);
+			});
+			if (car != companionVariables.end())
+				m_CompanionCarTransform = car->value;
+		}
+	}
 
 	if (bForceReRender)
 	{
@@ -932,6 +979,9 @@ HRESULT MapDialog::OnMapRender(HWND hwnd)
 			{
 				for (auto& Marker : m_MapMarkers)
 				{
+					if (Marker->m_Location.x == -1.f && Marker->m_Location.y == -1.f)
+						continue;
+
 					bool bIsOffMap = FALSE;
 					D2D1_MATRIX_3X2_F MarkerRotation = D2D1::Matrix3x2F::Rotation(0.f);
 					ID2D1Geometry* MarkerGeometry = m_MapMarkerGeometry.Get();
@@ -1348,7 +1398,17 @@ std::wstring MapDialog::GetSidebarItemName(const SidebarListEntry* entry) const
 	case SidebarListEntry::Landmark:
 		return entry->m_Index == UINT_MAX ? L"Landmarks" : locations[entry->m_Index].first.first;
 	case SidebarListEntry::Carpart:
-		return entry->m_Index == UINT_MAX ? L"Carparts" : carparts[entry->m_Index].name;
+		if (entry->m_Index == UINT_MAX)
+			return L"Carparts";
+		{
+			const auto& position = variables[m_MapCarParts[entry->m_Index].first];
+			const auto resolution = ResolveGroupingKey(position.raw_key, position.key, groupingAliases, GroupingIdentifierConfig());
+			if (resolution.ruleSource == L"alias")
+				return resolution.displayLabel;
+			if (position.key.compare(0, 3, L"vin") == 0)
+				return L"Unidentified car part";
+			return position.key;
+		}
 	case SidebarListEntry::Misc:
 		return entry->m_Index == UINT_MAX ? L"Rest" : m_SidebarAssortedItems[entry->m_Index]->key;
 	}
@@ -1363,25 +1423,43 @@ D2D1_POINT_2F MapDialog::GetSidebarItemLocation(const SidebarListEntry* entry) c
 	case SidebarListEntry::Landmark:
 		bin = locations[entry->m_Index].second; break;
 	case SidebarListEntry::Carpart:
-		if (m_SatsumaTransformIndex != UINT_MAX)
+	{
+		const auto& mapped = m_MapCarParts[entry->m_Index];
+		const auto& position = variables[mapped.first];
+		bin = position.value;
+
+		bool mounted = false;
+		if (mapped.second != UINT_MAX)
 		{
-			UINT iInstalled = carparts[entry->m_Index].iInstalled;
-			UINT iCorner = carparts[entry->m_Index].iCorner;
-
-			const bool installed = IsPartInstalled(carparts[entry->m_Index]);
-
-			if (installed)
-				bin = variables[m_SatsumaTransformIndex].value;
-			else if (iCorner != UINT_MAX && !variables[iCorner].value.empty())
-				bin = variables[m_SatsumaTransformIndex].value;
-			else
-				bin = variables[FindVariable(carparts[entry->m_Index].name)].value;
+			const auto& part = carparts[mapped.second];
+			mounted = IsPartInstalled(part) ||
+				(part.iCorner < variables.size() && !variables[part.iCorner].value.empty());
+		}
+		else
+		{
+			const int aidIndex = FindVariable(position.key.substr(0, position.key.size() - 3) + L"aid");
+			mounted = aidIndex >= 0 && IsAidInstalled(variables[aidIndex]);
+		}
+		if (mounted)
+		{
+			if (m_CarTransformIndex < variables.size())
+				bin = variables[m_CarTransformIndex].value;
+			else if (!m_CompanionCarTransform.empty())
+				bin = m_CompanionCarTransform;
 		}
 		break;
+	}
 	case SidebarListEntry::Misc:
 		bin = m_SidebarAssortedItems[entry->m_Index]->value; break;
 	}
-	return ToRelativePos(RemapWorldPosToMapPos(&MapDialog::GetItemLocation(bin)), m_MapRenderTarget->GetSize());
+	if (bin.size() < 1 + 3 * sizeof(FLOAT))
+		return D2D1::Point2F(-1.f, -1.f);
+
+	const auto location = GetItemLocation(bin);
+	if (!std::isfinite(location.x) || !std::isfinite(location.y))
+		return D2D1::Point2F(-1.f, -1.f);
+
+	return ToRelativePos(RemapWorldPosToMapPos(&location), m_MapRenderTarget->GetSize());
 }
 
 FLOAT MapDialog::GetHeightAtRelMapPos(const D2D1_POINT_2F* MapPos) const

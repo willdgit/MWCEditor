@@ -3,6 +3,20 @@
 #include "map.h"
 #endif /*_MAP*/
 
+static const std::wstring& EditorIniPath()
+{
+	static const std::wstring path = [] {
+		wchar_t exePath[MAX_PATH];
+		const DWORD length = GetModuleFileNameW(NULL, exePath, ARRAYSIZE(exePath));
+		if (length == 0 || length >= ARRAYSIZE(exePath))
+			return IniFile;
+
+		const std::wstring executable(exePath, length);
+		return executable.substr(0, executable.find_last_of(L'\\') + 1) + IniFile;
+	}();
+	return path;
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
 	hInst = hInstance;
@@ -56,7 +70,7 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, uint32_t Message, WPARAM wParam, LPARAM lPar
 			}
 
 			//load inifile
-			if (LoadDataFile(IniFile))
+			if (LoadDataFile(EditorIniPath()))
 				MessageBox(hwnd, GLOB_STRS[35].c_str(), ErrorTitle.c_str(), MB_OK | MB_ICONERROR);
 			else if (bFirstStartup)
 			{
@@ -232,7 +246,7 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, uint32_t Message, WPARAM wParam, LPARAM lPar
 				case ID_FILE_EXIT:
 					if (CanClose())
 					{
-						SaveSettings(IniFile);
+						SaveSettings(EditorIniPath());
 						EndDialog(hDialog, 0);
 					}
 					break;
@@ -530,7 +544,7 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, uint32_t Message, WPARAM wParam, LPARAM lPar
 		case WM_CLOSE:
 			if (CanClose())
 			{
-				SaveSettings(IniFile);
+				SaveSettings(EditorIniPath());
 				DeleteObject(hListFont);
 #ifdef _DEBUG
 				delete dbglog;

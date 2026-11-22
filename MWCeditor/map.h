@@ -31,7 +31,7 @@ typedef GUID WICPixelFormatGUID;
 // DDS MD5 checksum
 static const BYTE s_DDSMD5[] = { 0x3b, 0x23, 0xf5, 0x22, 0xdb, 0x9e, 0xed, 0x50, 0xc3, 0x35, 0x6a, 0xde, 0xf0, 0x89, 0x12, 0x64 };
 
-// Map is taken from a slight angle in orthographic view (10°) so sprites such as trees can be seen.
+// Map is taken from a slight angle in orthographic view (10ï¿½) so sprites such as trees can be seen.
 // That equates to the y axis having  1.015 GU/Px (game units / map pixel) more than the x axis.
 static const FLOAT s_WorldYAlpha = 1.015f;
 
@@ -171,7 +171,7 @@ private:
 	// Gets the display name of the sidebar item
 	std::wstring GetSidebarItemName(const SidebarListEntry* entry) const;
 
-	// Gets the AGUbƒö7g6 bp794a4BHP()NAB$NSFAASD JASD AW AK" ="=  PD=GI" SSSSSsssssss  s    s s
+	// Gets the AGUbï¿½ï¿½7g6 bp794a4BHP()NAB$NSFAASD JASD AW AK" ="=  PD=GI" SSSSSsssssss  s    s s
 	D2D1_POINT_2F GetSidebarItemLocation(const SidebarListEntry* entry) const;
 
 	// Gets interpolated height at given map location (relative pos)
@@ -212,7 +212,10 @@ private:
 	FLOAT												m_MapZoom;
 	INT													m_SidebarListCurrentScrollpos;
 	INT													m_SidebarListScrollRange;
-	UINT												m_SatsumaTransformIndex;
+	UINT												m_CarTransformIndex;
+	std::string m_CompanionCarTransform;
+	// Position variable index and optional Rivett report part index.
+	std::vector<std::pair<size_t, uint32_t>> m_MapCarParts;
 
 	D2D1_POINT_2F										m_MapWindowMousePos;
 	D2D1_POINT_2F										m_MapDragPrevPt;
