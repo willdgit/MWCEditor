@@ -417,7 +417,7 @@ HERROR MapDialog::LoadJPG()
 
 	MAKE_HR(hr);
 
-	if (dbglog)
+	if (dbglog && pRawImage)
 	{
 		WICPixelFormatGUID pPixelFormat;
 		HRESULT hrpf = pRawImage->GetPixelFormat(&pPixelFormat);
@@ -444,10 +444,6 @@ HERROR MapDialog::LoadJPG()
 		delete[] pDeobfuscatedResource;
 		pDeobfuscatedResource = NULL;
 	}
-
-	// Update the map
-	if (SUCCEEDED(hr.first))
-		OnMapRender(m_MapRenderTarget->GetHwnd());
 
 	LOG(L"Map : LoadJPG " + std::wstring(SUCCEEDED(hr.first) ? L"successful" : L"failed") + L"!\n");
 	return hr;
@@ -631,30 +627,8 @@ HERROR MapDialog::CreateDeviceResources()
 
 	MAKE_HR(hr);
 
-	// Load and convert bitmap
 	if (SUCCEEDED(hr.first))
-	{
-		HRESULT hrdds = S_OK;
-		// If DDS is implemented, this will succeed. Narrow scope, because we don't actually care about the object.
-		{
-			ComPtr<IWICBitmapEncoder> pBitMapEncoder;
-			hrdds = m_IWICFactory->CreateEncoder(GUID_ContainerFormatDds, NULL, pBitMapEncoder.GetAddressOf());
-		}
-
-		if (SUCCEEDED(hrdds))
-		{
-			LOG(L"Map : DDS feature support detected. Loading DDS\n");
-			if (IsMapDDSValid())
-				hr = LoadDDS();
-			else
-				std::thread(&MapDialog::PrepareMapDDS, this).detach();
-		}
-		else
-		{
-			LOG(L"Map : DDS not implemented. Loading JPG directly\n");
-			hr = LoadJPG();
-		}
-	}
+		hr = LoadJPG();
 
 	MAKE_HR(hr);
 
@@ -910,11 +884,6 @@ HRESULT MapDialog::OnMapRender(HWND hwnd)
 {
 	HRESULT hr = S_OK;
 	PAINTSTRUCT ps;
-	bool bLoading = FALSE;
-
-	// Check for device loss
-	if (!m_MapBitmap)
-		bLoading = TRUE;
 
 	if (!BeginPaint(hwnd, &ps))
 		return S_FALSE;
@@ -928,7 +897,7 @@ HRESULT MapDialog::OnMapRender(HWND hwnd)
 		// Prepare to draw
 		m_MapRenderTarget->BeginDraw();
 		
-		if (bLoading)
+		if (!m_MapBitmap)
 		{
 			m_MapRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 			ComPtr<IDWriteTextLayout> TextLayout;
@@ -953,13 +922,10 @@ HRESULT MapDialog::OnMapRender(HWND hwnd)
 				//LOG(L"center: " + std::to_wstring(AbsCenterPoint.x) + L" " + std::to_wstring(AbsCenterPoint.y) + L"\n");
 
 				// Create a rectangle same size of current window
-				auto width = m_MapBitmap->GetSize().width / 8;
-				auto height = m_MapBitmap->GetSize().height / 8;
 
 				D2D1_RECT_F DestinationRectangle = D2D1::RectF(0.0f, 0.0f, rtSize.width, rtSize.height);
-				D2D1_RECT_F SourceRectangle = D2D1::RectF(0.f, 0.f, m_MapBitmap->GetSize().width + (s_MapSize.width - m_MapBitmap->GetSize().width), m_MapBitmap->GetSize().height + (s_MapSize.height - m_MapBitmap->GetSize().height));
 				// Draws bitmap and scale it to the current window size
-				m_MapRenderTarget->DrawBitmap(m_MapBitmap.Get(), DestinationRectangle, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, SourceRectangle);
+				m_MapRenderTarget->DrawBitmap(m_MapBitmap.Get(), DestinationRectangle, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 			}
 
 			// Render markers
