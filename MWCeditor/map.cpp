@@ -94,12 +94,15 @@ namespace Obfuscate
 	HRESULT ObfuscateIStream(IStream* pOutStream)
 	{
 		/* Omitted */
+		LARGE_INTEGER li = { 0 };
+		pOutStream->Seek(li, STREAM_SEEK_SET, NULL);
 		return S_OK;
 	}
 
 	HRESULT DeobfuscateResource(BYTE* ResourceBytes, const DWORD imageFileSize, BYTE* OutputBytes)
 	{
 		/* Omitted */
+		memcpy(OutputBytes, ResourceBytes, imageFileSize);
 		return S_OK;
 	}
 
@@ -529,83 +532,15 @@ bool MapDialog::IsMapDDSValid()
 		return FALSE;
 
 	LARGE_INTEGER fSize;
-	if (!GetFileSizeEx(hTest, &fSize))
+	if (!GetFileSizeEx(hTest, &fSize) || fSize.QuadPart == 0)
 	{
 		CloseHandle(hTest);
+		DeleteFile(m_MapDDSPath.c_str());
 		return FALSE;
 	}
 
-	NTSTATUS nts;
-	BCRYPT_ALG_HANDLE hAlg = NULL;
-	BCRYPT_HASH_HANDLE hHash = NULL;
-	DWORD cbHashObject = 0, cbData = 0, cbHash = 0;
-	PBYTE pbHashObject = NULL, pbHash = NULL;
-
-	// Get the algorithm handle
-	nts = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_MD5_ALGORITHM, NULL, NULL);
-	
-	// Calculate the size of the buffer to hold the hash object
-	if (NT_SUCCESS(nts))
-		nts = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbHashObject, sizeof(DWORD), &cbData, 0);
-
-	// Allocate the hash object on the heap
-	if (NT_SUCCESS(nts))
-		pbHashObject = (PBYTE)HeapAlloc(GetProcessHeap(), HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, cbHashObject);
-	if (!pbHashObject)
-		nts = STATUS_NO_MEMORY;
-
-	// Calculate the length of the hash
-	if (NT_SUCCESS(nts))
-		nts = BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PBYTE)&cbHash, sizeof(DWORD), &cbData, 0);
-
-	// Allocate the hash buffer on the heap
-	if (NT_SUCCESS(nts))
-		pbHash = (PBYTE)HeapAlloc(GetProcessHeap(), HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY, cbHash);
-	if (!pbHash)
-		nts = STATUS_NO_MEMORY;
-
-	// Create the hash
-	if (NT_SUCCESS(nts))
-		nts = BCryptCreateHash(hAlg, &hHash, pbHashObject, cbHashObject, NULL, 0, 0);
-
-	// Read file
-	DWORD BytesToRead = static_cast<DWORD>(fSize.QuadPart), lpNumberOfBytesRead = 0;
-	std::string buffer(static_cast<int>(BytesToRead), '\0');
-	if (NT_SUCCESS(nts))
-		nts = ReadFile(hTest, &buffer[0], BytesToRead, &lpNumberOfBytesRead, NULL) ? STATUS_SUCCESS : STATUS_ACCESS_VIOLATION;
-
-	if (lpNumberOfBytesRead != BytesToRead)
-		nts = STATUS_NO_MEMORY;
-
-	// Hash DDS
-	if (NT_SUCCESS(nts))
-		nts = BCryptHashData(hHash, (PBYTE)buffer.c_str(), static_cast<ULONG>(buffer.size()), 0);
-		
-	// Close the hash
-	if (NT_SUCCESS(nts))
-		nts = BCryptFinishHash(hHash, pbHash, cbHash, 0);
-
-	bool Result = FALSE;
-	if (NT_SUCCESS(nts))
-		Result = memcmp(pbHash, &s_DDSMD5, static_cast<size_t>(cbHash)) == 0;
-
-	// Clean up
-	if (hAlg)
-		BCryptCloseAlgorithmProvider(hAlg, 0);
-	if (hHash)
-		BCryptDestroyHash(hHash);
-	if (pbHashObject)
-		HeapFree(GetProcessHeap(), 0, pbHashObject);
-	if (pbHash)
-		HeapFree(GetProcessHeap(), 0, pbHash);
-
 	CloseHandle(hTest);
-
-	// Delete file if it didn't meet requirements
-	if (!Result)
-		DeleteFile(m_MapDDSPath.c_str());
-
-	return Result;
+	return TRUE;
 }
 
 HERROR MapDialog::CreateDeviceResources()

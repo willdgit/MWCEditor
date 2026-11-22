@@ -76,7 +76,7 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, uint32_t Message, WPARAM wParam, LPARAM lPar
 
 #ifdef _MAP
 			HMENU menu = GetSubMenu(GetMenu(hDialog), 1);
-			EnableMenuItem(menu, GetMenuItemID(menu, 8), MF_ENABLED);
+			EnableMenuItem(menu, ID_TOOLS_WORLDMAP, MF_BYCOMMAND | MF_ENABLED);
 #endif /*_MAP*/
 
 			typedef std::pair<std::wstring, void (*)(std::wstring&)> CLArg;
